@@ -1,4 +1,63 @@
-import { Patient, Condition } from "@/types/fhir";
+"use client";
+
+import { useState } from "react";
+import { Patient, Condition, Observation, Procedure } from "@/types/fhir";
+
+const PAGE_SIZE = 10;
+
+function usePagination<T>(items: T[]) {
+  const [page, setPage] = useState(0);
+  const totalPages = Math.max(1, Math.ceil(items.length / PAGE_SIZE));
+  const pageItems = items.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+  return {
+    pageItems,
+    page,
+    totalPages,
+    prev: () => setPage((p) => Math.max(0, p - 1)),
+    next: () => setPage((p) => Math.min(totalPages - 1, p + 1)),
+  };
+}
+
+function Pagination({
+  page,
+  totalPages,
+  total,
+  onPrev,
+  onNext,
+}: {
+  page: number;
+  totalPages: number;
+  total: number;
+  onPrev: () => void;
+  onNext: () => void;
+}) {
+  if (totalPages <= 1) return null;
+  const start = page * PAGE_SIZE + 1;
+  const end = Math.min((page + 1) * PAGE_SIZE, total);
+  return (
+    <div className="flex items-center justify-between mt-3 pt-3 border-t border-gray-100">
+      <span className="text-xs text-gray-400">
+        {start}–{end} of {total}
+      </span>
+      <div className="flex gap-2">
+        <button
+          onClick={onPrev}
+          disabled={page === 0}
+          className="px-3 py-1 text-xs rounded border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-30 disabled:cursor-not-allowed"
+        >
+          Previous
+        </button>
+        <button
+          onClick={onNext}
+          disabled={page === totalPages - 1}
+          className="px-3 py-1 text-xs rounded border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-30 disabled:cursor-not-allowed"
+        >
+          Next
+        </button>
+      </div>
+    </div>
+  );
+}
 
 function formatDate(iso: string | null): string {
   if (!iso) return "—";
@@ -16,69 +75,197 @@ function age(birthDate: string | null): string {
   let years = today.getFullYear() - birth.getFullYear();
   const m = today.getMonth() - birth.getMonth();
   if (m < 0 || (m === 0 && today.getDate() < birth.getDate())) years--;
-  return String(years);
+  return `${years} yrs`;
 }
+
+const STATUS_COLORS: Record<string, string> = {
+  active: "bg-green-100 text-green-700",
+  inactive: "bg-gray-100 text-gray-600",
+  resolved: "bg-blue-50 text-blue-600",
+};
 
 interface Props {
   patient: Patient;
   conditions: Condition[];
+  observations: Observation[];
+  procedures: Procedure[];
 }
 
-export default function ClinicalSnapshot({ patient, conditions }: Props) {
-  const activeConditions = conditions.filter((c) => c.status === "active");
+export default function ClinicalSnapshot({ patient, conditions, observations, procedures }: Props) {
+  const activeConditions = conditions
+    .filter((c) => c.status === "active")
+    .sort((a, b) => (b.onsetDate ?? "").localeCompare(a.onsetDate ?? ""));
+
+  const sortedProcedures = [...procedures]
+    .filter((p) => p.date)
+    .sort((a, b) => b.date!.localeCompare(a.date!));
+
+  const sortedObservations = [...observations]
+    .filter((o) => o.date)
+    .sort((a, b) => b.date!.localeCompare(a.date!));
+
+  const conditionPagination = usePagination(activeConditions);
+  const procedurePagination = usePagination(sortedProcedures);
+  const observationPagination = usePagination(sortedObservations);
 
   return (
-    <div className="bg-white border border-gray-200 rounded-lg p-6">
-      <div className="flex items-start justify-between">
-        <div>
-          <h2 className="text-2xl font-semibold text-gray-900">
-            {patient.fullName ?? "Unknown Patient"}
-          </h2>
-          <p className="text-sm text-gray-500 mt-1">
-            {patient.familyName}, {patient.givenNames.join(" ")}
-          </p>
-        </div>
-        {patient.deceasedDate && (
-          <span className="bg-gray-100 text-gray-600 text-xs font-medium px-3 py-1 rounded-full">
-            Deceased {formatDate(patient.deceasedDate)}
-          </span>
+    <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+      {/* Header */}
+      <div className="px-6 py-4 border-b border-gray-100">
+        <h2 className="text-lg font-semibold text-gray-900">Clinical Snapshot</h2>
+        <p className="text-sm text-gray-500 mt-0.5">{patient.fullName ?? "Unknown Patient"}</p>
+      </div>
+
+      {/* Demographics */}
+      <div className="px-6 py-4 border-b border-gray-100 bg-gray-50">
+        <dl className="grid grid-cols-2 gap-x-8 gap-y-3 text-sm sm:grid-cols-4">
+          <div>
+            <dt className="text-gray-400 uppercase text-xs tracking-wide">Age</dt>
+            <dd className="mt-0.5 font-medium text-gray-800">{age(patient.birthDate)}</dd>
+          </div>
+          <div>
+            <dt className="text-gray-400 uppercase text-xs tracking-wide">Date of Birth</dt>
+            <dd className="mt-0.5 font-medium text-gray-800">{formatDate(patient.birthDate)}</dd>
+          </div>
+          <div>
+            <dt className="text-gray-400 uppercase text-xs tracking-wide">Sex</dt>
+            <dd className="mt-0.5 font-medium text-gray-800">{patient.birthSex ?? patient.gender ?? "—"}</dd>
+          </div>
+          <div>
+            <dt className="text-gray-400 uppercase text-xs tracking-wide">Status</dt>
+            <dd className="mt-0.5 font-medium text-gray-800">
+              {patient.deceasedDate ? (
+                <span className="text-red-600">Deceased {formatDate(patient.deceasedDate)}</span>
+              ) : (
+                "Active"
+              )}
+            </dd>
+          </div>
+        </dl>
+      </div>
+
+      {/* Active Conditions */}
+      <div className="px-6 py-5 border-b border-gray-100">
+        <h3 className="text-sm font-semibold text-gray-700 mb-3">
+          Active Conditions
+          <span className="ml-2 font-normal text-gray-400">({activeConditions.length})</span>
+        </h3>
+        {activeConditions.length === 0 ? (
+          <p className="text-sm text-gray-400">None recorded</p>
+        ) : (
+          <>
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-xs uppercase tracking-wide text-gray-400 border-b border-gray-100">
+                  <th className="pb-2 font-medium">Condition</th>
+                  <th className="pb-2 font-medium">Code</th>
+                  <th className="pb-2 font-medium">Onset</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-50">
+                {conditionPagination.pageItems.map((c, i) => (
+                  <tr key={c.id ?? i} className="hover:bg-gray-50">
+                    <td className="py-2.5 pr-4 text-gray-800">{c.display ?? "—"}</td>
+                    <td className="py-2.5 pr-4 text-gray-400 font-mono text-xs">{c.code ?? "—"}</td>
+                    <td className="py-2.5 text-gray-500">{formatDate(c.onsetDate)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <Pagination
+              page={conditionPagination.page}
+              totalPages={conditionPagination.totalPages}
+              total={activeConditions.length}
+              onPrev={conditionPagination.prev}
+              onNext={conditionPagination.next}
+            />
+          </>
         )}
       </div>
 
-      <dl className="mt-5 grid grid-cols-2 gap-x-8 gap-y-3 text-sm sm:grid-cols-4">
-        <div>
-          <dt className="text-gray-400 uppercase text-xs tracking-wide">Date of Birth</dt>
-          <dd className="mt-0.5 font-medium text-gray-800">{formatDate(patient.birthDate)}</dd>
-        </div>
-        <div>
-          <dt className="text-gray-400 uppercase text-xs tracking-wide">Age</dt>
-          <dd className="mt-0.5 font-medium text-gray-800">{age(patient.birthDate)}</dd>
-        </div>
-        <div>
-          <dt className="text-gray-400 uppercase text-xs tracking-wide">Birth Sex</dt>
-          <dd className="mt-0.5 font-medium text-gray-800">{patient.birthSex ?? "—"}</dd>
-        </div>
-        <div>
-          <dt className="text-gray-400 uppercase text-xs tracking-wide">Gender</dt>
-          <dd className="mt-0.5 font-medium text-gray-800 capitalize">{patient.gender ?? "—"}</dd>
-        </div>
-      </dl>
-
-      <div className="mt-5 pt-5 border-t border-gray-100">
-        <p className="text-xs uppercase tracking-wide text-gray-400 mb-2">Active Conditions</p>
-        {activeConditions.length === 0 ? (
-          <p className="text-sm text-gray-500">None recorded</p>
+      {/* Recent Procedures */}
+      <div className="px-6 py-5 border-b border-gray-100">
+        <h3 className="text-sm font-semibold text-gray-700 mb-3">
+          Recent Procedures
+          <span className="ml-2 font-normal text-gray-400">({sortedProcedures.length})</span>
+        </h3>
+        {sortedProcedures.length === 0 ? (
+          <p className="text-sm text-gray-400">None recorded</p>
         ) : (
-          <div className="flex flex-wrap gap-2">
-            {activeConditions.map((c) => (
-              <span
-                key={c.id}
-                className="bg-blue-50 text-blue-700 text-xs px-2.5 py-1 rounded-full"
-              >
-                {c.display ?? c.code ?? "Unknown"}
-              </span>
-            ))}
-          </div>
+          <>
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-xs uppercase tracking-wide text-gray-400 border-b border-gray-100">
+                  <th className="pb-2 font-medium">Procedure</th>
+                  <th className="pb-2 font-medium">Status</th>
+                  <th className="pb-2 font-medium">Date</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-50">
+                {procedurePagination.pageItems.map((p, i) => (
+                  <tr key={p.id ?? i} className="hover:bg-gray-50">
+                    <td className="py-2.5 pr-4 text-gray-800">{p.display ?? "—"}</td>
+                    <td className="py-2.5 pr-4">
+                      <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_COLORS[p.status ?? ""] ?? "bg-gray-100 text-gray-600"}`}>
+                        {p.status ?? "unknown"}
+                      </span>
+                    </td>
+                    <td className="py-2.5 text-gray-500">{formatDate(p.date)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <Pagination
+              page={procedurePagination.page}
+              totalPages={procedurePagination.totalPages}
+              total={sortedProcedures.length}
+              onPrev={procedurePagination.prev}
+              onNext={procedurePagination.next}
+            />
+          </>
+        )}
+      </div>
+
+      {/* Key Observations */}
+      <div className="px-6 py-5">
+        <h3 className="text-sm font-semibold text-gray-700 mb-3">
+          Key Observations
+          <span className="ml-2 font-normal text-gray-400">({sortedObservations.length})</span>
+        </h3>
+        {sortedObservations.length === 0 ? (
+          <p className="text-sm text-gray-400">None recorded</p>
+        ) : (
+          <>
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-xs uppercase tracking-wide text-gray-400 border-b border-gray-100">
+                  <th className="pb-2 font-medium">Observation</th>
+                  <th className="pb-2 font-medium">Value</th>
+                  <th className="pb-2 font-medium">Date</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-50">
+                {observationPagination.pageItems.map((o, i) => (
+                  <tr key={o.id ?? i} className="hover:bg-gray-50">
+                    <td className="py-2.5 pr-4 text-gray-800">{o.display ?? "—"}</td>
+                    <td className="py-2.5 pr-4 text-gray-700">
+                      {o.value != null
+                        ? `${o.value}${o.unit ? " " + o.unit : ""}`
+                        : o.valueString ?? "—"}
+                    </td>
+                    <td className="py-2.5 text-gray-500">{formatDate(o.date)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <Pagination
+              page={observationPagination.page}
+              totalPages={observationPagination.totalPages}
+              total={sortedObservations.length}
+              onPrev={observationPagination.prev}
+              onNext={observationPagination.next}
+            />
+          </>
         )}
       </div>
     </div>
