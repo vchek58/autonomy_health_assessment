@@ -1,7 +1,6 @@
 package com.example.service;
 
 import com.example.fhir.FhirParser;
-import com.example.model.Patient;
 import com.example.model.PatientRecord;
 import jakarta.annotation.PostConstruct;
 import org.springframework.stereotype.Service;
@@ -45,11 +44,11 @@ public class PatientService {
      * TODO: if 1000 patients is too slow for prefix search, build a trie or use
      *   a simple sorted list with binary search on startup
      */
-    public List<Patient> searchByName(String query) {
+    public List<PatientRecord> searchByName(String query) {
         String lower = query.toLowerCase();
         return records.values().stream()
-                .map(PatientRecord::patient)
-                .filter(p -> p.fullName() != null && p.fullName().toLowerCase().contains(lower))
+                .filter(r -> r.patient().fullName() != null
+                        && r.patient().fullName().toLowerCase().contains(lower))
                 .collect(Collectors.toList());
     }
 

@@ -1,6 +1,5 @@
 package com.example.api;
 
-import com.example.model.Patient;
 import com.example.model.PatientRecord;
 import com.example.service.PatientService;
 import org.springframework.http.ResponseEntity;
@@ -60,7 +59,7 @@ public class PatientController {
      *   network call isn't fired on every keystroke
      */
     @GetMapping("/search")
-    public List<Patient> searchByName(@RequestParam String name) {
+    public List<PatientRecord> searchByName(@RequestParam String name) {
         return patientService.searchByName(name);
     }
 
