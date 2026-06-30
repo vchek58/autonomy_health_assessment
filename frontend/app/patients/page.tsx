@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { searchPatients, getAllPatients } from "@/lib/api";
 import { PatientRecord } from "@/types/fhir";
@@ -54,8 +55,18 @@ export default function PatientSelectorPage() {
   return (
     <div className="min-h-screen bg-gray-50">
       <header className="bg-white border-b border-gray-200 px-6 py-4">
-        <h1 className="text-xl font-semibold text-gray-900">Prior Authorization Review</h1>
-        <p className="text-sm text-gray-500 mt-0.5">Select a patient to review their clinical record</p>
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-xl font-semibold text-gray-900">Prior Authorization Review</h1>
+            <p className="text-sm text-gray-500 mt-0.5">Select a patient to review their clinical record</p>
+          </div>
+          <Link
+            href="/cohort"
+            className="text-sm text-blue-600 hover:underline font-medium"
+          >
+            Cohort Report →
+          </Link>
+        </div>
       </header>
 
       <main className="max-w-3xl mx-auto px-6 py-8">

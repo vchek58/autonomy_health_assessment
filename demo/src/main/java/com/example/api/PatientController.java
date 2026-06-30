@@ -1,6 +1,8 @@
 package com.example.api;
 
+import com.example.model.EligibilityResult;
 import com.example.model.PatientRecord;
+import com.example.service.EligibilityService;
 import com.example.service.PatientService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.CrossOrigin;
@@ -19,9 +21,11 @@ import java.util.List;
 public class PatientController {
 
     private final PatientService patientService;
+    private final EligibilityService eligibilityService;
 
-    public PatientController(PatientService patientService) {
+    public PatientController(PatientService patientService, EligibilityService eligibilityService) {
         this.patientService = patientService;
+        this.eligibilityService = eligibilityService;
     }
 
     /**
@@ -63,6 +67,17 @@ public class PatientController {
         return patientService.searchByName(name);
     }
 
-    // TODO: add GET /api/patients/{id}/eligibility for Part C per-patient eligibility
+    /**
+     * GET /api/patients/{id}/eligibility
+     * Evaluates bariatric surgery eligibility for a single patient and returns the full
+     * decision trace with evidence FHIR resource IDs for Part D AI grounding.
+     */
+    @GetMapping("/{id}/eligibility")
+    public ResponseEntity<EligibilityResult> getEligibility(@PathVariable String id) {
+        return patientService.findById(id)
+                .map(record -> ResponseEntity.ok(eligibilityService.evaluatePatient(record)))
+                .orElse(ResponseEntity.notFound().build());
+    }
+
     // TODO: add GET /api/patients/{id}/ai-review for Part D AI-assisted review
 }

@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { getPatient } from "@/lib/api";
+import { getPatient, getPatientEligibility } from "@/lib/api";
 import ClinicalSnapshot from "@/components/ClinicalSnapshot";
+import EligibilityPanel from "@/components/EligibilityPanel";
 import ObservationTimeline from "@/components/ObservationTimeline";
 
 interface Props {
@@ -11,9 +12,12 @@ interface Props {
 export default async function PatientPage({ params }: Props) {
   const { id } = await params;
 
-  let record;
+  let record, eligibility;
   try {
-    record = await getPatient(id);
+    [record, eligibility] = await Promise.all([
+      getPatient(id),
+      getPatientEligibility(id),
+    ]);
   } catch {
     notFound();
   }
@@ -45,6 +49,7 @@ export default async function PatientPage({ params }: Props) {
           observations={observations}
           procedures={procedures}
         />
+        <EligibilityPanel eligibility={eligibility} conditions={conditions} />
       </main>
     </div>
   );

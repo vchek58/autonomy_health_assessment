@@ -1,4 +1,4 @@
-import { PatientRecord } from "@/types/fhir";
+import { CohortReport, EligibilityResult, PatientRecord } from "@/types/fhir";
 
 const BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8080";
 
@@ -18,4 +18,12 @@ export function getPatient(id: string): Promise<PatientRecord> {
 
 export function searchPatients(name: string): Promise<PatientRecord[]> {
   return get(`/api/patients/search?name=${encodeURIComponent(name)}`);
+}
+
+export function getPatientEligibility(id: string): Promise<EligibilityResult> {
+  return get(`/api/patients/${encodeURIComponent(id)}/eligibility`);
+}
+
+export function getCohortReport(): Promise<CohortReport> {
+  return get("/api/eligibility/cohort");
 }

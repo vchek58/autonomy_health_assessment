@@ -1,6 +1,8 @@
 package com.example.fhir;
 
 import com.example.model.Condition;
+import com.example.model.DocumentReference;
+import com.example.model.MedicationRequest;
 import com.example.model.Observation;
 import com.example.model.Patient;
 import com.example.model.Procedure;
@@ -123,6 +125,42 @@ public class FhirNormalizer {
         }
 
         return new Observation(id, patientId, display, loincCode, value, unit, valueString, date);
+    }
+
+    public static MedicationRequest normalizeMedicationRequest(JsonNode node) {
+        String id = text(node, "id");
+        String patientId = resolveReference(node.path("subject").path("reference").asText(null));
+
+        String display = null;
+        String rxNormCode = null;
+        JsonNode coding = node.path("medicationCodeableConcept").path("coding");
+        if (coding.isArray() && !coding.isEmpty()) {
+            JsonNode first = coding.get(0);
+            display = first.path("display").asText(null);
+            rxNormCode = first.path("code").asText(null);
+        }
+        if (display == null) {
+            display = node.path("medicationCodeableConcept").path("text").asText(null);
+        }
+
+        return new MedicationRequest(id, patientId, display, rxNormCode,
+                text(node, "status"), text(node, "authoredOn"));
+    }
+
+    public static DocumentReference normalizeDocumentReference(JsonNode node) {
+        String id = text(node, "id");
+        String patientId = resolveReference(node.path("subject").path("reference").asText(null));
+
+        String typeCode = null;
+        String typeDisplay = null;
+        JsonNode coding = node.path("type").path("coding");
+        if (coding.isArray() && !coding.isEmpty()) {
+            JsonNode first = coding.get(0);
+            typeCode = first.path("code").asText(null);
+            typeDisplay = first.path("display").asText(null);
+        }
+
+        return new DocumentReference(id, patientId, typeCode, typeDisplay, text(node, "date"));
     }
 
     public static Procedure normalizeProcedure(JsonNode node) {

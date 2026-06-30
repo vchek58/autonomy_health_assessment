@@ -1,6 +1,8 @@
 package com.example.fhir;
 
 import com.example.model.Condition;
+import com.example.model.DocumentReference;
+import com.example.model.MedicationRequest;
 import com.example.model.Observation;
 import com.example.model.Patient;
 import com.example.model.PatientRecord;
@@ -78,10 +80,29 @@ public class FhirParser {
         });
         System.out.printf("Procedures parsed in %d ms%n", System.currentTimeMillis() - procedureStart);
 
-        // TODO: parse MedicationRequest and DocumentReference for Part C eligibility evidence
-        //   (prior weight-loss attempts and psychological evaluation may live in those types)
+        // Step 5: Parse medication requests
+        long medStart = System.currentTimeMillis();
+        Map<String, List<MedicationRequest>> medicationsByPatient = new HashMap<>();
+        parseResourceFiles("MedicationRequest", node -> {
+            MedicationRequest mr = FhirNormalizer.normalizeMedicationRequest(node);
+            if (mr.patientId() != null) {
+                medicationsByPatient.computeIfAbsent(mr.patientId(), k -> new ArrayList<>()).add(mr);
+            }
+        });
+        System.out.printf("MedicationRequests parsed in %d ms%n", System.currentTimeMillis() - medStart);
 
-        // Step 5: Assemble final PatientRecord map
+        // Step 6: Parse document references
+        long docStart = System.currentTimeMillis();
+        Map<String, List<DocumentReference>> documentsByPatient = new HashMap<>();
+        parseResourceFiles("DocumentReference", node -> {
+            DocumentReference dr = FhirNormalizer.normalizeDocumentReference(node);
+            if (dr.patientId() != null) {
+                documentsByPatient.computeIfAbsent(dr.patientId(), k -> new ArrayList<>()).add(dr);
+            }
+        });
+        System.out.printf("DocumentReferences parsed in %d ms%n", System.currentTimeMillis() - docStart);
+
+        // Step 7: Assemble final PatientRecord map
         Map<String, PatientRecord> records = new HashMap<>();
         for (Map.Entry<String, Patient> entry : patients.entrySet()) {
             String id = entry.getKey();
@@ -89,7 +110,9 @@ public class FhirParser {
                     entry.getValue(),
                     conditionsByPatient.getOrDefault(id, List.of()),
                     observationsByPatient.getOrDefault(id, List.of()),
-                    proceduresByPatient.getOrDefault(id, List.of())
+                    proceduresByPatient.getOrDefault(id, List.of()),
+                    medicationsByPatient.getOrDefault(id, List.of()),
+                    documentsByPatient.getOrDefault(id, List.of())
             ));
         }
 

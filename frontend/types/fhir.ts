@@ -47,3 +47,28 @@ export interface PatientRecord {
   observations: Observation[];
   procedures: Procedure[];
 }
+
+export type EligibilityStatus = "ELIGIBLE" | "NOT_ELIGIBLE" | "UNKNOWN";
+
+export type UnknownReason =
+  | "MISSING_BMI_OBSERVATION"
+  | "MISSING_PRIOR_WEIGHT_LOSS_EVIDENCE"
+  | "MISSING_PSYCH_EVAL_EVIDENCE";
+
+export interface EligibilityResult {
+  status: EligibilityStatus;
+  bmiValue: number | null;
+  bmiObservationId: string | null;
+  matchedComorbidityIds: string[];
+  weightLossEvidenceIds: string[];
+  psychEvalEvidenceIds: string[];
+  unknownReasons: UnknownReason[];
+}
+
+export interface CohortReport {
+  totalPatients: number;
+  eligibleCount: number;
+  notEligibleCount: number;
+  unknownCount: number;
+  unknownReasonBreakdown: Partial<Record<UnknownReason, number>>;
+}

@@ -8,5 +8,7 @@ public record PatientRecord(
     Patient patient,
     List<Condition> conditions,
     List<Observation> observations,
-    List<Procedure> procedures
+    List<Procedure> procedures,
+    List<MedicationRequest> medicationRequests,
+    List<DocumentReference> documentReferences
 ) {}

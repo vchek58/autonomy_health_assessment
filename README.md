@@ -70,6 +70,39 @@ The frontend is a Next.js 16 application (TypeScript, Tailwind CSS, App Router) 
 
 ---
 
+## Part C: Eligibility Logic & Cohort Report
+
+Deterministic bariatric surgery eligibility evaluation applied to every patient record in memory, with a per-patient panel and a cohort-level summary.
+
+**Eligibility criteria:**
+- BMI ≥ 40 with prior weight-loss evidence and a psychological evaluation → **Eligible**
+- BMI 35–40 with at least one qualifying comorbidity, weight-loss evidence, and a psychological evaluation → **Eligible**
+- BMI < 35 → **Not Eligible**
+- Any qualifying BMI without complete documentation, or no BMI recorded → **Unknown** (with specific reasons listed)
+
+Comorbidities accepted: essential hypertension, type 2 diabetes, hyperlipidemia, sleep apnea, and diabetic retinopathy (all verified against SNOMED codes present in this dataset).
+
+Every factual claim in the eligibility result carries the source FHIR resource ID — this grounding is required for Part D AI-assisted review.
+
+**Finding the Eligibility Assessment (per patient):**
+Open any patient from the selector page. The **Eligibility Assessment** panel appears at the bottom of the Patient View, below the Timeline View. It shows:
+- A color-coded status badge (green = Eligible, red = Not Eligible, yellow = Unknown)
+- BMI value and its source FHIR observation ID in a two-column layout
+- Comorbidities matched, each with its source Condition FHIR ID
+- A documentation checklist (prior weight-loss evidence and psychological evaluation), each with evidence FHIR IDs or a Missing indicator
+- If Unknown: an explicit list of which requirements are unmet
+
+**Finding the Cohort Report:**
+Click **Cohort Report →** in the top-right corner of the Patient Selector page, or navigate directly to `http://localhost:3000/cohort`. The report shows:
+- Total patients evaluated with a breakdown by status (count + percentage)
+- A table of the top reasons patients are classified Unknown, with patient counts
+
+**API endpoints added:**
+- `GET /api/patients/{id}/eligibility` — full eligibility decision trace for one patient
+- `GET /api/eligibility/cohort` — aggregated cohort counts and unknown-reason breakdown
+
+---
+
 ## Project Structure
 
 ```
