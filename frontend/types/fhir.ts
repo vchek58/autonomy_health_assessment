@@ -72,3 +72,20 @@ export interface CohortReport {
   unknownCount: number;
   unknownReasonBreakdown: Partial<Record<UnknownReason, number>>;
 }
+
+export type ChecklistStatus = "MET" | "NOT_MET" | "UNKNOWN";
+
+export interface ChecklistItem {
+  requirement: string;
+  status: ChecklistStatus;
+  evidenceIds: string[];
+}
+
+export interface AiReview {
+  clinicalSummary: string;
+  eligibilityAssessment: EligibilityResult;
+  checklist: ChecklistItem[];
+  recommendedNextSteps: string[];
+  generatedAt: string;
+  degraded: boolean;
+}

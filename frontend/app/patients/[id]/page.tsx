@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getPatient, getPatientEligibility } from "@/lib/api";
+import AiReviewPanel from "@/components/AiReviewPanel";
 import ClinicalSnapshot from "@/components/ClinicalSnapshot";
 import EligibilityPanel from "@/components/EligibilityPanel";
 import ObservationTimeline from "@/components/ObservationTimeline";
@@ -50,6 +51,7 @@ export default async function PatientPage({ params }: Props) {
           procedures={procedures}
         />
         <EligibilityPanel eligibility={eligibility} conditions={conditions} />
+        <AiReviewPanel patientId={id} />
       </main>
     </div>
   );
