@@ -20,6 +20,9 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.stream.Collectors;
 
 @Component
@@ -33,15 +36,9 @@ public class FhirParser {
     }
 
     /**
-     * Parses all FHIR NDJSON files in the data directory and returns a map of
-     * patientId → PatientRecord containing all their normalized resources.
-     *
-     * Sequential baseline: files are read one at a time.
-     * TODO (performance optimization): after benchmarking this baseline, switch
-     *   Observation file parsing to parallel using CompletableFuture or parallelStream
-     *   to exploit multi-core I/O. Observation has 14 shards and is the dominant cost.
-     *   Note: the accumulator maps below must be replaced with ConcurrentHashMap and
-     *   thread-safe list types before parallelizing.
+     * Parses all FHIR NDJSON files and returns a map of patientId → PatientRecord.
+     * Uses parallel observation parsing. To benchmark sequential vs parallel, swap
+     * parseObservationFilesInParallel() for parseObservationFilesSequentially() below.
      */
     public Map<String, PatientRecord> parseAll() throws IOException {
         if (!Files.exists(dataDirectory)) {
@@ -53,22 +50,12 @@ public class FhirParser {
 
         long start = System.currentTimeMillis();
 
-        // Step 1: Patients must be parsed first so we can key everything else off their IDs
+        // Step 1: Patients must be parsed first — all other resources reference their IDs
         Map<String, Patient> patients = parsePatients();
 
-        // Step 2: Initialize per-patient accumulator lists
-        Map<String, List<Condition>> conditionsByPatient = new HashMap<>();
-        Map<String, List<Observation>> observationsByPatient = new HashMap<>();
-        Map<String, List<Procedure>> proceduresByPatient = new HashMap<>();
-        for (String id : patients.keySet()) {
-            conditionsByPatient.put(id, new ArrayList<>());
-            observationsByPatient.put(id, new ArrayList<>());
-            proceduresByPatient.put(id, new ArrayList<>());
-        }
-
-        // Step 3: Parse remaining resource types and group by patient
-        // --- SEQUENTIAL BASELINE (measure this before optimizing) ---
+        // Step 2: Parse conditions
         long conditionStart = System.currentTimeMillis();
+        Map<String, List<Condition>> conditionsByPatient = new HashMap<>();
         parseResourceFiles("Condition", node -> {
             Condition c = FhirNormalizer.normalizeCondition(node);
             if (c.patientId() != null) {
@@ -77,17 +64,12 @@ public class FhirParser {
         });
         System.out.printf("Conditions parsed in %d ms%n", System.currentTimeMillis() - conditionStart);
 
-        // TODO: record observationStart time here for the before/after benchmark
-        long observationStart = System.currentTimeMillis();
-        parseResourceFiles("Observation", node -> {
-            Observation o = FhirNormalizer.normalizeObservation(node);
-            if (o.patientId() != null) {
-                observationsByPatient.computeIfAbsent(o.patientId(), k -> new ArrayList<>()).add(o);
-            }
-        });
-        System.out.printf("Observations parsed in %d ms%n", System.currentTimeMillis() - observationStart);
+        // Step 3: Parse observations — swap methods here to compare performance
+        Map<String, List<Observation>> observationsByPatient = parseObservationFilesInParallel();
 
+        // Step 4: Parse procedures
         long procedureStart = System.currentTimeMillis();
+        Map<String, List<Procedure>> proceduresByPatient = new HashMap<>();
         parseResourceFiles("Procedure", node -> {
             Procedure p = FhirNormalizer.normalizeProcedure(node);
             if (p.patientId() != null) {
@@ -96,11 +78,10 @@ public class FhirParser {
         });
         System.out.printf("Procedures parsed in %d ms%n", System.currentTimeMillis() - procedureStart);
 
-        // TODO: parse MedicationRequest and DocumentReference if needed for Part C
-        //   (prior weight-loss attempt evidence and psychological evaluation docs
-        //   may be in these resource types)
+        // TODO: parse MedicationRequest and DocumentReference for Part C eligibility evidence
+        //   (prior weight-loss attempts and psychological evaluation may live in those types)
 
-        // Step 4: Assemble final PatientRecord map
+        // Step 5: Assemble final PatientRecord map
         Map<String, PatientRecord> records = new HashMap<>();
         for (Map.Entry<String, Patient> entry : patients.entrySet()) {
             String id = entry.getKey();
@@ -118,6 +99,100 @@ public class FhirParser {
         return records;
     }
 
+    /**
+     * Parses all 14 Observation shards one at a time on the calling thread.
+     * This is the baseline to measure before applying the parallel optimization.
+     * Swap this into parseAll() in place of parseObservationFilesInParallel() to benchmark.
+     */
+    @SuppressWarnings("unused")
+    private Map<String, List<Observation>> parseObservationFilesSequentially() throws IOException {
+        long start = System.currentTimeMillis();
+
+        List<Observation> all = new ArrayList<>();
+        for (Path file : getNdjsonFiles("Observation")) {
+            all.addAll(parseSingleObservationFile(file));
+        }
+
+        Map<String, List<Observation>> result = groupObservationsByPatient(all);
+        System.out.printf("[Sequential] Observations parsed in %d ms%n",
+                System.currentTimeMillis() - start);
+        return result;
+    }
+
+    /**
+     * Parses all 14 Observation shards concurrently using a fixed thread pool.
+     * Each shard is parsed independently into its own List<Observation>, then all
+     * lists are merged on the main thread — no shared mutable state during parsing.
+     */
+    private Map<String, List<Observation>> parseObservationFilesInParallel() throws IOException {
+        long start = System.currentTimeMillis();
+
+        List<Path> files = getNdjsonFiles("Observation");
+        int threadCount = Math.min(files.size(), Runtime.getRuntime().availableProcessors());
+        ExecutorService pool = Executors.newFixedThreadPool(threadCount);
+
+        try {
+            // Submit one task per shard — each returns its own independent list
+            List<CompletableFuture<List<Observation>>> futures = files.stream()
+                    .map(file -> CompletableFuture.supplyAsync(
+                            () -> parseSingleObservationFile(file), pool))
+                    .collect(Collectors.toList());
+
+            // Wait for all shards, flatten into one list, then group by patient
+            List<Observation> all = futures.stream()
+                    .map(CompletableFuture::join)
+                    .flatMap(List::stream)
+                    .collect(Collectors.toList());
+
+            Map<String, List<Observation>> result = groupObservationsByPatient(all);
+            System.out.printf("[Parallel]   Observations parsed in %d ms using %d threads%n",
+                    System.currentTimeMillis() - start, threadCount);
+            return result;
+        } finally {
+            pool.shutdown();
+        }
+    }
+
+    /**
+     * Parses a single Observation NDJSON shard into a flat list.
+     * Returns an empty list (never throws) so futures don't fail silently on I/O errors.
+     */
+    private List<Observation> parseSingleObservationFile(Path file) {
+        List<Observation> results = new ArrayList<>();
+        try (BufferedReader reader = Files.newBufferedReader(file)) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                if (line.isBlank()) continue;
+                try {
+                    JsonNode node = mapper.readTree(line);
+                    Observation o = FhirNormalizer.normalizeObservation(node);
+                    if (o.patientId() != null) {
+                        results.add(o);
+                    }
+                } catch (Exception e) {
+                    System.err.printf("Skipping malformed line in %s: %s%n",
+                            file.getFileName(), e.getMessage());
+                }
+            }
+        } catch (IOException e) {
+            System.err.printf("Failed to read observation shard %s: %s%n",
+                    file.getFileName(), e.getMessage());
+        }
+        return results;
+    }
+
+    /**
+     * Groups a flat list of Observations into a map keyed by patientId.
+     * Called once after all shards have finished parsing — single-threaded, no locks needed.
+     */
+    private Map<String, List<Observation>> groupObservationsByPatient(List<Observation> observations) {
+        Map<String, List<Observation>> map = new HashMap<>();
+        for (Observation o : observations) {
+            map.computeIfAbsent(o.patientId(), k -> new ArrayList<>()).add(o);
+        }
+        return map;
+    }
+
     private Map<String, Patient> parsePatients() throws IOException {
         Map<String, Patient> patients = new HashMap<>();
         for (Path file : getNdjsonFiles("Patient")) {
@@ -132,8 +207,8 @@ public class FhirParser {
     }
 
     /**
-     * Finds all shards for a resource type (e.g. "Observation.000.ndjson",
-     * "Observation.001.ndjson", ...) and invokes the consumer for each JSON line.
+     * Finds all shards for a resource type (e.g. Condition.000.ndjson, Condition.001.ndjson)
+     * and invokes the consumer for each JSON line.
      */
     private void parseResourceFiles(String resourceType, ResourceConsumer consumer) throws IOException {
         for (Path file : getNdjsonFiles(resourceType)) {
@@ -152,7 +227,8 @@ public class FhirParser {
                 } catch (Exception e) {
                     // TODO: replace with structured logging (slf4j) so malformed lines
                     //   are traceable without stopping the entire parse
-                    System.err.printf("Skipping malformed line in %s: %s%n", file.getFileName(), e.getMessage());
+                    System.err.printf("Skipping malformed line in %s: %s%n",
+                            file.getFileName(), e.getMessage());
                 }
             }
         }

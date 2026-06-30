@@ -2,6 +2,26 @@
 
 A clinician-facing prior authorization review tool that ingests raw FHIR bulk data, presents a patient clinical view, and uses AI-assisted reasoning to determine whether a patient is likely to meet bariatric surgery coverage requirements.
 
+## Part A: Data Ingestion
+
+Observation - 14 files
+Procedure - 3 files
+Condition - 1 file
+Patient - 1 file
+
+Observation files are 4x larger than the next largest resource and it's where most of the parsing time is spent. We could read each file sequentially into memory. Considering that each Observation file contains independent data with no specified ordering, we can parse the files independently.
+
+First, I measure the processing time to parse each Observation file sequentially.
+
+
+Then, I measured the processing time to parse each Observation file in parallel.
+```
+Conditions parsed in 164 ms
+[Parallel]   Observations parsed in 1049 ms using 10 threads
+Procedures parsed in 497 ms
+Total: parsed 1132 patients in 1779 ms
+```
+
 ## Project Structure
 
 ```
@@ -35,8 +55,6 @@ autonomy_health_assessment/
 
 Spring Boot application entry point. Bootstraps the application context, which triggers `PatientService` to parse all FHIR data on startup.
 
----
-
 ### `model/`
 
 Normalized internal data model. Each class is a Java record representing a single FHIR resource type, containing only the fields relevant to this application. Raw FHIR JSON is never exposed outside the `fhir/` layer.
@@ -49,8 +67,6 @@ Normalized internal data model. Each class is a Java record representing a singl
 | `Procedure.java` | A procedure performed on a patient: display name, SNOMED/CPT code, status, date |
 | `PatientRecord.java` | Aggregate of one `Patient` and all their associated `Condition`, `Observation`, and `Procedure` lists. This is the primary unit consumed by the frontend and eligibility logic |
 
----
-
 ### `fhir/`
 
 Responsible for reading raw FHIR NDJSON files from disk and converting them into normalized model objects. Nothing outside this package deals with raw JSON.
@@ -60,8 +76,6 @@ Responsible for reading raw FHIR NDJSON files from disk and converting them into
 | `FhirParser.java` | Reads all NDJSON shards for each resource type (`Patient`, `Condition`, `Observation`, `Procedure`) line by line. Resolves cross-references (e.g. `Condition.subject.reference → Patient`) and groups all resources by patient ID into a `Map<String, PatientRecord>`. Contains timing instrumentation for the Part A performance benchmark |
 | `FhirNormalizer.java` | Converts a single raw `JsonNode` into the corresponding model object. Handles missing or partial fields by returning `null` rather than throwing. Extracts nested values such as the first coding display, LOINC/SNOMED codes, and FHIR extensions (e.g. `us-core-birthsex`) |
 
----
-
 ### `service/`
 
 Business logic layer between the parser and the REST API.
@@ -70,8 +84,6 @@ Business logic layer between the parser and the REST API.
 |---|---|
 | `PatientService.java` | Calls `FhirParser.parseAll()` once at startup via `@PostConstruct` and holds the resulting map in memory. Exposes `findAll()`, `findById()`, and `searchByName()` for the API layer to query |
 
----
-
 ### `api/`
 
 REST controllers that expose parsed patient data to the Next.js frontend over HTTP.
@@ -79,8 +91,6 @@ REST controllers that expose parsed patient data to the Next.js frontend over HT
 | File | Purpose |
 |---|---|
 | `PatientController.java` | Handles three endpoints: `GET /api/patients` (all patients), `GET /api/patients/{id}` (single patient record), `GET /api/patients/search?name=` (name search for the patient selector). CORS is configured for `localhost:3000` |
-
----
 
 ### `application.properties`
 
