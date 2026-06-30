@@ -6,6 +6,10 @@ import com.example.model.Patient;
 import com.example.model.Procedure;
 import com.fasterxml.jackson.databind.JsonNode;
 
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+
 /**
  * Converts raw FHIR JsonNode objects into normalized internal model objects.
  * Each method extracts only the fields the application needs and safely handles
@@ -17,17 +21,33 @@ public class FhirNormalizer {
         String id = text(node, "id");
 
         String fullName = null;
+        String familyName = null;
+        List<String> givenNames = Collections.emptyList();
         JsonNode names = node.path("name");
         if (names.isArray() && !names.isEmpty()) {
-            JsonNode first = names.get(0);
-            String given = first.path("given").isArray() && !first.path("given").isEmpty()
-                    ? first.path("given").get(0).asText("")
-                    : "";
-            String family = first.path("family").asText("");
-            fullName = (given + " " + family).trim();
+            JsonNode official = findOfficialName(names);
+            familyName = official.path("family").asText(null);
+
+            JsonNode givenNode = official.path("given");
+            if (givenNode.isArray() && !givenNode.isEmpty()) {
+                List<String> collected = new ArrayList<>();
+                for (JsonNode g : givenNode) {
+                    collected.add(g.asText());
+                }
+                givenNames = Collections.unmodifiableList(collected);
+            }
+
+            String firstName = givenNames.isEmpty() ? "" : givenNames.get(0);
+            fullName = (firstName + " " + (familyName != null ? familyName : "")).trim();
         }
 
-        return new Patient(id, fullName, text(node, "gender"), text(node, "birthDate"));
+        // birthSex is stored in the extension array, not as a top-level field
+        String birthSex = extractExtension(node, "us-core-birthsex", "valueCode");
+
+        String deceasedDate = text(node, "deceasedDateTime");
+
+        return new Patient(id, fullName, familyName, givenNames, text(node, "gender"),
+                birthSex, text(node, "birthDate"), deceasedDate);
     }
 
     public static Condition normalizeCondition(JsonNode node) {
@@ -129,6 +149,30 @@ public class FhirNormalizer {
         }
 
         return new Procedure(id, patientId, display, code, codeSystem, text(node, "status"), date);
+    }
+
+    // Finds an extension by the last segment of its URL and returns the given value field.
+    // e.g. extractExtension(node, "us-core-birthsex", "valueCode") → "F"
+    private static String extractExtension(JsonNode node, String urlSuffix, String valueField) {
+        JsonNode extensions = node.path("extension");
+        if (!extensions.isArray()) return null;
+        for (JsonNode ext : extensions) {
+            String url = ext.path("url").asText("");
+            if (url.endsWith(urlSuffix)) {
+                return ext.path(valueField).asText(null);
+            }
+        }
+        return null;
+    }
+
+    // Returns the name entry with use="official", falling back to the first entry if none found
+    private static JsonNode findOfficialName(JsonNode names) {
+        for (JsonNode name : names) {
+            if ("official".equals(name.path("use").asText(null))) {
+                return name;
+            }
+        }
+        return names.get(0);
     }
 
     // "Patient/abc-123" → "abc-123"

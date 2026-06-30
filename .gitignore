@@ -11,3 +11,5 @@ demo/target/
 # IDE
 .idea/
 *.iml
+
+.vscode/
