@@ -92,7 +92,7 @@ export default function PatientSelectorPage() {
                     <span className="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded">Deceased</span>
                   )}
                 </div>
-                <div className="text-sm text-gray-500 mt-1 flex gap-4">
+                <div className="text-sm text-gray-900 mt-1 flex gap-4">
                   <span>DOB: {formatDate(patient.birthDate)}</span>
                   <span>Sex: {patient.birthSex ?? patient.gender ?? "—"}</span>
                 </div>

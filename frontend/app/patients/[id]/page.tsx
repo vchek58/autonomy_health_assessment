@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getPatient } from "@/lib/api";
 import ClinicalSnapshot from "@/components/ClinicalSnapshot";
+import ObservationTimeline from "@/components/ObservationTimeline";
 
 interface Props {
   params: Promise<{ id: string }>;
@@ -33,10 +34,14 @@ export default async function PatientPage({ params }: Props) {
         </div>
       </header>
 
-      <main className="max-w-4xl mx-auto px-6 py-8">
+      <main className="max-w-4xl mx-auto px-6 py-8 space-y-6">
         <ClinicalSnapshot
           patient={patient}
           conditions={conditions}
+          observations={observations}
+          procedures={procedures}
+        />
+        <ObservationTimeline
           observations={observations}
           procedures={procedures}
         />
