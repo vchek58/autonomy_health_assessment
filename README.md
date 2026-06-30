@@ -2,25 +2,73 @@
 
 A clinician-facing prior authorization review tool that ingests raw FHIR bulk data, presents a patient clinical view, and uses AI-assisted reasoning to determine whether a patient is likely to meet bariatric surgery coverage requirements.
 
+The system is split into two services: a Spring Boot backend that parses and serves FHIR data over a REST API, and a Next.js frontend that provides the clinician-facing UI.
+
+## Running the Application
+
+**Backend** (port 8080):
+```bash
+cd demo
+JAVA_HOME=/Library/Java/JavaVirtualMachines/jdk-17.jdk/Contents/Home mvn spring-boot:run
+```
+
+**Frontend** (port 3000):
+```bash
+cd frontend
+npm run dev
+```
+
+Open `http://localhost:3000` to use the application.
+
+---
+
 ## Part A: Data Ingestion
 
-Observation - 14 files
-Procedure - 3 files
-Condition - 1 file
-Patient - 1 file
+The dataset contains 18 FHIR resource types across 49 NDJSON shards. The largest by volume:
 
-Observation files are 4x larger than the next largest resource and it's where most of the parsing time is spent. We could read each file sequentially into memory. Considering that each Observation file contains independent data with no specified ordering, we can parse the files independently.
+| Resource | Shards | Notes |
+|---|---|---|
+| Observation | 14 | Labs, vitals, BMI — most parsing time |
+| DiagnosticReport | 7 | Clinical notes |
+| DocumentReference | 6 | Psych evaluations, clinical documents |
+| Procedure | 3 | Weight-loss and other procedures |
+| MedicationRequest | 3 | Prescriptions |
 
-First, I measure the processing time to parse each Observation file sequentially.
+Observation files are where most of the parsing time is spent. Because each shard contains independent data with no required ordering, they can be parsed concurrently.
 
+**Sequential parsing:**
+```
+Conditions parsed in 212 ms
+[Sequential] Observations parsed in 1865 ms
+Procedures parsed in 442 ms
+Total: parsed 1132 patients in 2591 ms
+```
 
-Then, I measured the processing time to parse each Observation file in parallel.
+**Parallel parsing (10 threads):**
 ```
 Conditions parsed in 164 ms
 [Parallel]   Observations parsed in 1049 ms using 10 threads
 Procedures parsed in 497 ms
 Total: parsed 1132 patients in 1779 ms
 ```
+
+Parallelizing the 14 Observation shards reduced observation parse time from 1865 ms to 1049 ms — a 44% improvement.
+
+---
+
+## Part B: Clinical Frontend
+
+The frontend is a Next.js 16 application (TypeScript, Tailwind CSS, App Router) served on port 3000.
+
+**Patient Selector** (`/patients`) — search bar that queries the backend as you type. Results show patient name, date of birth, and sex. Clicking a patient navigates to their clinical view.
+
+**Patient View** (`/patients/[id]`) — two panels rendered for the selected patient:
+
+- **Clinical Snapshot** — demographics (age, date of birth, sex), followed by paginated tables for active conditions, recent procedures, and key observations. Each table shows 10 rows at a time with Previous/Next controls. Missing data fields are highlighted with a red **Missing** badge.
+
+- **Timeline View** — all observations and procedures combined into a single chronological list (most recent first), paginated at 10 rows. Each row shows the resource type, name, date, and source FHIR resource ID.
+
+---
 
 ## Project Structure
 
@@ -46,10 +94,28 @@ autonomy_health_assessment/
 │           │   └── PatientService.java
 │           └── api/
 │               └── PatientController.java
+├── frontend/                    # Next.js frontend (TypeScript, Tailwind)
+│   ├── app/
+│   │   ├── layout.tsx
+│   │   ├── page.tsx             # redirects → /patients
+│   │   └── patients/
+│   │       ├── page.tsx         # Patient Selector
+│   │       └── [id]/
+│   │           └── page.tsx     # Patient View
+│   ├── components/
+│   │   ├── ClinicalSnapshot.tsx
+│   │   ├── ObservationTimeline.tsx
+│   │   └── Missing.tsx
+│   ├── lib/
+│   │   └── api.ts               # typed fetch client → Spring Boot
+│   └── types/
+│       └── fhir.ts              # TypeScript mirrors of Java records
 └── sample-bulk-fhir-datasets-1000-patients/   # unzipped NDJSON data (gitignored)
 ```
 
 ---
+
+## Backend Components
 
 ### `Main.java`
 
@@ -73,7 +139,7 @@ Responsible for reading raw FHIR NDJSON files from disk and converting them into
 
 | File | Purpose |
 |---|---|
-| `FhirParser.java` | Reads all NDJSON shards for each resource type (`Patient`, `Condition`, `Observation`, `Procedure`) line by line. Resolves cross-references (e.g. `Condition.subject.reference → Patient`) and groups all resources by patient ID into a `Map<String, PatientRecord>`. Contains timing instrumentation for the Part A performance benchmark |
+| `FhirParser.java` | Reads all NDJSON shards for each resource type (`Patient`, `Condition`, `Observation`, `Procedure`) line by line. Resolves cross-references (e.g. `Condition.subject.reference → Patient`) and groups all resources by patient ID into a `Map<String, PatientRecord>`. Observation shards are parsed in parallel using a fixed thread pool. |
 | `FhirNormalizer.java` | Converts a single raw `JsonNode` into the corresponding model object. Handles missing or partial fields by returning `null` rather than throwing. Extracts nested values such as the first coding display, LOINC/SNOMED codes, and FHIR extensions (e.g. `us-core-birthsex`) |
 
 ### `service/`
@@ -90,8 +156,32 @@ REST controllers that expose parsed patient data to the Next.js frontend over HT
 
 | File | Purpose |
 |---|---|
-| `PatientController.java` | Handles three endpoints: `GET /api/patients` (all patients), `GET /api/patients/{id}` (single patient record), `GET /api/patients/search?name=` (name search for the patient selector). CORS is configured for `localhost:3000` |
+| `PatientController.java` | `GET /api/patients` — all patient records. `GET /api/patients/{id}` — single patient record. `GET /api/patients/search?name=` — name search returning up to 15 matching patients. CORS configured for `localhost:3000`. |
 
 ### `application.properties`
 
 Configures the server port (`8080`) and the path to the unzipped FHIR data directory via `fhir.data.directory`. The data path can be overridden with the `FHIR_DATA_DIR` environment variable.
+
+---
+
+## Frontend Components
+
+### `types/fhir.ts`
+
+TypeScript interfaces that mirror the Java record classes. Shared across all pages and components to ensure the API response shape is typed end-to-end.
+
+### `lib/api.ts`
+
+Typed fetch client for the Spring Boot API. All HTTP calls go through here so the base URL is configured in one place via `NEXT_PUBLIC_API_BASE` (defaults to `http://localhost:8080`).
+
+### `components/ClinicalSnapshot.tsx`
+
+Displays a full clinical summary for one patient. Contains four sections: a demographics bar (age, DOB, sex, alive/deceased status) and three paginated tables — active conditions, recent procedures, and key observations. Each table paginates at 10 rows. Null fields are flagged with a red `Missing` badge via `Missing.tsx`.
+
+### `components/ObservationTimeline.tsx`
+
+Combines all observations and procedures into a single chronological timeline sorted by most recent date. Paginated at 10 rows per page. Each row shows resource type (color-coded badge), name, date, and the source FHIR resource ID. BMI observations (LOINC `39156-5`) are highlighted in yellow.
+
+### `components/Missing.tsx`
+
+Small shared component that renders a red `Missing` badge. Used in both `ClinicalSnapshot` and `ObservationTimeline` wherever a FHIR field is null.
