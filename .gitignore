@@ -1,0 +1,13 @@
+# FHIR data (too large for GitHub)
+*.zip
+*.ndjson
+
+# Java build output
+demo/target/
+
+# macOS
+.DS_Store
+
+# IDE
+.idea/
+*.iml
